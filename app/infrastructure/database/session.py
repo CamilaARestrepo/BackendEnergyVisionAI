@@ -2,11 +2,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from app.config import settings
 
 engine = create_async_engine(
-    settings.DATABASE_URL, 
+    settings.DATABASE_URL,
     echo=(settings.LOG_LEVEL == "DEBUG"),
     future=True,
-    # SQLite isolation adjustments
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    # Supabase exige SSL; asyncpg usa el parámetro "ssl" (no "sslmode").
+    connect_args={"ssl": "require"},
 )
 
 AsyncSessionLocal = async_sessionmaker(

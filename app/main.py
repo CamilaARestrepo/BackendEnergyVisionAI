@@ -30,10 +30,6 @@ async def lifespan(app: FastAPI):
     # Crear directorios requeridos
     os.makedirs(settings.UPLOADS_DIR, exist_ok=True)
 
-    db_path = settings.DATABASE_URL.replace("sqlite+aiosqlite:///", "")
-    if db_path.startswith("./"):
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-
     # Asegurar que el secret.key de Fernet exista (se genera automáticamente)
     # La instancia de SecurityService se encarga de esto al importarse
     from app.utils.security import security_service  # noqa: F401 — side effect import

@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     DESCRIPTION: str = "Plataforma de Detección Inteligente de Objetos."
     
-    DATABASE_URL: str = "sqlite+aiosqlite:///./data/energyvision.db"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://localhost:5174",
