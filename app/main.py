@@ -22,6 +22,16 @@ from app.utils.logger import logger
 from app.utils.exceptions import EnergyVisionBaseError
 
 
+def _safe_db_url(url: str) -> str:
+    """Devuelve la URL de BD sin credenciales, para logs seguros."""
+    try:
+        from sqlalchemy.engine import make_url
+        u = make_url(url)
+        return f"{u.drivername}://{u.username or ''}@***{u.host or '?'}:{u.port or ''}/{u.database or ''}"
+    except Exception:
+        return "<DATABASE_URL inválida o no configurada>"
+
+
 # ── Lifespan (startup / shutdown) ────────────────────────────────────────────
 
 @asynccontextmanager
@@ -35,7 +45,7 @@ async def lifespan(app: FastAPI):
     from app.utils.security import security_service  # noqa: F401 — side effect import
 
     logger.info(f"🌱 Iniciando {settings.TITLE} v{settings.VERSION}")
-    logger.info(f"   Database : {settings.DATABASE_URL}")
+    logger.info(f"   Database : {_safe_db_url(settings.DATABASE_URL)}")
     logger.info(f"   Uploads  : {settings.UPLOADS_DIR}")
     logger.info(f"   CORS     : {settings.CORS_ORIGINS}")
 
