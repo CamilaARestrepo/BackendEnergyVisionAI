@@ -8,7 +8,10 @@ class SecurityService:
         self._fernet = self._initialize_fernet()
 
     def _initialize_fernet(self) -> Fernet:
-        """Carga la clave desde el archivo o genera una nueva si no existe."""
+        """Carga la clave desde la env var, el archivo, o genera una nueva."""
+        if settings.SECRET_KEY:
+            return Fernet(settings.SECRET_KEY.encode("utf-8"))
+
         if not os.path.exists(self.secret_path):
             os.makedirs(os.path.dirname(self.secret_path), exist_ok=True)
             key = Fernet.generate_key()

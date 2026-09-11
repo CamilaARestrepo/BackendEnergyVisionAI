@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     UPLOADS_DIR: str = "./data/uploads"
     LOG_LEVEL: str = "INFO"
     SECRET_KEY_PATH: str = "./data/secret.key"
+    # Clave Fernet (base64) para descifrar api_key. Si se define, tiene
+    # prioridad sobre SECRET_KEY_PATH. Útil en entornos efímeros (Railway).
+    SECRET_KEY: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",
