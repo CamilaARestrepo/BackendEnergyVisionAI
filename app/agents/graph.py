@@ -23,6 +23,9 @@ builder.add_node("persist", persist_node)
 def should_continue_validation(state: AgentState):
     if state.get("errors"):
         return END
+    # Caché RAG: imagen duplicada → cortar el pipeline y responder desde BD
+    if state.get("cached"):
+        return END
     return "detection"
 
 # Función de enrutamiento condicional post-detection
@@ -52,11 +55,13 @@ builder.add_edge("persist", END)
 # Compilar grafo
 vision_graph = builder.compile()
 
-async def run_vision_pipeline(image_base64: str, mime_type: str) -> dict:
+async def run_vision_pipeline(image_base64: str, mime_type: str, force: bool = False) -> dict:
     """Ejecuta el pipeline completo y retorna el estado final o lanza exp."""
     initial_state = {
         "image_base64": image_base64,
         "image_mime_type": mime_type,
+        "cached": False,
+        "force": force,
         "errors": []
     }
     

@@ -46,6 +46,7 @@ class ScanResponse(BaseModel):
     energy: Optional[ScanEnergyResponse] = None
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
+    cached: bool = False
     processing_time_ms: int
 
 
@@ -53,12 +54,15 @@ class ScanResponse(BaseModel):
 async def scan_object(
     image: UploadFile = File(..., description="Imagen física del objeto a analizar."),
     notes: str = Form(None, description="Anotaciones extra opcionales."),
+    force: bool = Form(False, description="True para ignorar la caché RAG y re-analizar incluso si la imagen ya fue procesada."),
     db: AsyncSession = Depends(get_db_session),
 ):
     """
     Orquesta el motor de inferencia multimodelo delegando al agente LangGraph.
 
     El pipeline ejecuta los nodos: validate → detect → waste → energy → enrich → persist.
+    Si la imagen ya fue analizada (mismo hash) y force=False, se corta el pipeline
+    y se responde el resultado guardado sin invocar ninguna llamada LLM (caché RAG).
     """
     start_time = time.time()
 
@@ -81,7 +85,7 @@ async def scan_object(
     # ── Codificar en base64 y lanzar el pipeline ─────────────────────────────
     b64_img = base64.b64encode(bytes_data).decode("utf-8")
     # Nota: el validate_image_node re-validará con magic bytes y hará resize
-    final_state = await run_vision_pipeline(b64_img, image.content_type or "image/jpeg")
+    final_state = await run_vision_pipeline(b64_img, image.content_type or "image/jpeg", force=force)
 
     if final_state.get("errors"):
         errors_str = " | ".join(final_state["errors"])
@@ -90,6 +94,8 @@ async def scan_object(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Error en inferencia IA: {errors_str}",
         )
+
+    from_cache = bool(final_state.get("cached", False))
 
     db_id = final_state.get("db_record_id")
     if not db_id:
@@ -107,7 +113,7 @@ async def scan_object(
         )
 
     processing_time = int((time.time() - start_time) * 1000)
-    logger.info(f"Scan completado: id={db_id}, tiempo={processing_time}ms")
+    logger.info(f"Scan completado: id={db_id}, cached={from_cache}, tiempo={processing_time}ms")
 
     # Mapear energy_data
     energy_response = None
@@ -137,5 +143,6 @@ async def scan_object(
         energy=energy_response,
         ai_provider=db_obj.ai_provider,
         ai_model=db_obj.ai_model,
+        cached=from_cache,
         processing_time_ms=processing_time,
     )

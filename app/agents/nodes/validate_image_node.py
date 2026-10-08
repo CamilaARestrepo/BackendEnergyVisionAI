@@ -14,6 +14,7 @@ from app.agents.state import AgentState
 from app.utils.exceptions import ImageValidationError
 from app.utils.image_utils import validate_image_magic_bytes, resize_image_for_ai, compute_sha256
 from app.utils.logger import logger
+from app.config import settings
 
 
 async def validate_image_node(state: AgentState) -> dict:
@@ -47,6 +48,29 @@ async def validate_image_node(state: AgentState) -> dict:
     processed_b64 = base64.b64encode(processed_bytes).decode("utf-8")
     image_hash = compute_sha256(processed_bytes)
 
+    # 5. Caché RAG: si la imagen ya fue analizada (mismo hash) y no se fuerza
+    #    re-análisis, se corta el pipeline y se responde desde la BD ahorrando
+    #    las 4 llamadas LLM (detection, waste, energy, enrichment).
+    if settings.ENABLE_IMAGE_CACHE and not state.get("force"):
+        from app.infrastructure.database.session import AsyncSessionLocal
+        from app.infrastructure.repositories.object_repository import object_repository
+
+        async with AsyncSessionLocal() as db:
+            existing = await object_repository.get_by_hash(db, image_hash)
+            if existing is not None:
+                logger.info(
+                    f"Caché RAG: imagen duplicada (hash={image_hash[:12]}...) "
+                    f"→ respondiendo desde BD (id={existing.id})."
+                )
+                return {
+                    "image_base64": processed_b64,
+                    "image_mime_type": processed_mime,
+                    "image_hash": image_hash,
+                    "db_record_id": existing.id,
+                    "cached": True,
+                    "errors": [],
+                }
+
     logger.info(
         f"Imagen validada: mime={processed_mime}, "
         f"tamaño_original={len(raw_bytes):,}B, "
@@ -58,5 +82,6 @@ async def validate_image_node(state: AgentState) -> dict:
         "image_base64": processed_b64,
         "image_mime_type": processed_mime,
         "image_hash": image_hash,
+        "cached": False,
         "errors": [],
     }

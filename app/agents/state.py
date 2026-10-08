@@ -11,5 +11,7 @@ class AgentState(TypedDict):
     energy_data: Optional[Dict[str, Any]]           # Resultado del nodo energético
     enriched_data: Optional[Dict[str, Any]]         # Datos adicionales del nodo de enriquecimiento
     db_record_id: Optional[int]                     # ID del registro persistido en SQLite
+    cached: bool                                    # True si se respondió desde BD (imagen duplicada)
+    force: bool                                     # True si se fuerza re-análisis ignorando caché
     errors: List[str]                               # Errores acumulados no fatales
 
