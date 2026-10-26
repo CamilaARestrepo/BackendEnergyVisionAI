@@ -1,20 +1,23 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import make_url, URL
 from app.config import settings
 
 
-def _force_async_driver(raw_url: str) -> str:
+def _force_async_driver(raw_url: str) -> URL:
     """
-    Fuerza el driver asyncpg sin importar cómo venga la URL.
+    Fuerza el driver asyncpg y desactiva el caché de sentencias preparadas.
 
-    Evita el error ``ModuleNotFoundError: No module named 'psycopg'``
-    cuando el proveedor (Railway/Supabase) entrega la cadena como
-    ``postgresql://`` en lugar de ``postgresql+asyncpg://``.
+    - Evita ``ModuleNotFoundError: psycopg`` cuando la URL llega como
+      ``postgresql://`` en lugar de ``postgresql+asyncpg://``.
+    - Evita ``DuplicatePreparedStatementError`` de pgbouncer (Supabase
+      transaction pooler, puerto 6543), que no soporta prepared statements.
     """
     url = make_url(raw_url)
     if url.drivername in ("postgres", "postgresql", "postgresql+psycopg", "postgresql+psycopg2"):
         url = url.set(drivername="postgresql+asyncpg")
-    return url.render_as_string(hide_password=False)
+    # pgbouncer en modo transaction/statement no soporta prepared statements.
+    url = url.update_query_dict({"prepared_statement_cache_size": "0"})
+    return url
 
 
 engine = create_async_engine(
@@ -23,8 +26,13 @@ engine = create_async_engine(
     future=True,
     pool_pre_ping=True,
     pool_recycle=1800,
-    # Supabase exige SSL; asyncpg usa el parámetro "ssl" (no "sslmode").
-    connect_args={"ssl": "require"},
+    connect_args={
+        # Supabase exige SSL; asyncpg usa el parámetro "ssl" (no "sslmode").
+        "ssl": "require",
+        # Desactiva el caché interno de prepared statements de asyncpg
+        # (requerido cuando se usa pgbouncer/pooler en modo transaction).
+        "statement_cache_size": 0,
+    },
 )
 
 AsyncSessionLocal = async_sessionmaker(
