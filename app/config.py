@@ -1,4 +1,5 @@
 import os
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -30,5 +31,22 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def _force_asyncpg_driver(cls, v: str) -> str:
+        """
+        Garantiza que la URL use el driver asyncpg.
+
+        Supabase (y otros proveedores) entregan la cadena como
+        ``postgresql://`` o ``postgres://``. Si se deja así, SQLAlchemy
+        intenta cargar psycopg por defecto y falla con
+        ``ModuleNotFoundError: No module named 'psycopg'``.
+        """
+        if v.startswith("postgres://"):
+            v = "postgresql://" + v[len("postgres://"):]
+        if v.startswith("postgresql://"):
+            v = "postgresql+asyncpg://" + v[len("postgresql://"):]
+        return v
 
 settings = Settings()
