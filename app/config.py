@@ -43,6 +43,7 @@ class Settings(BaseSettings):
         intenta cargar psycopg por defecto y falla con
         ``ModuleNotFoundError: No module named 'psycopg'``.
         """
+        v = v.strip().strip('"').strip("'")
         if v.startswith("postgres://"):
             v = "postgresql://" + v[len("postgres://"):]
         if v.startswith("postgresql://"):
