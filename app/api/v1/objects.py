@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import date, datetime, time
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.infrastructure.database.session import get_db_session
@@ -45,16 +45,33 @@ async def list_objects(
     page_size: int = Query(20, ge=1, le=100),
     category: Optional[str] = None,
     provider: Optional[str] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    search: Optional[str] = None,
     db: AsyncSession = Depends(get_db_session)
 ):
-    """Devuelve listado paginado filtrable."""
-    filters = {}
-    if category: filters["object_category"] = category
-    if provider: filters["ai_provider"] = provider
-    
-    total, items = await object_repository.list_paginated(db, page, page_size, **filters)
+    """Devuelve listado paginado con filtros de categoría, proveedor y rango de fechas."""
+    from_dt = datetime.combine(from_date, time.min) if from_date else None
+    to_dt = datetime.combine(to_date, time.max) if to_date else None
+
+    if from_dt and to_dt and from_dt > to_dt:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "La fecha inicial no puede ser posterior a la fecha final.",
+        )
+
+    total, items = await object_repository.list_paginated(
+        db,
+        page,
+        page_size,
+        category=category,
+        provider=provider,
+        from_date=from_dt,
+        to_date=to_dt,
+        search=search,
+    )
     pages = (total + page_size - 1) // page_size
-    
+
     return PaginatedObjectResponse(
         items=items,
         total=total,
@@ -62,6 +79,11 @@ async def list_objects(
         page_size=page_size,
         pages=pages
     )
+
+@router.get("/categories", response_model=List[str])
+async def list_categories(db: AsyncSession = Depends(get_db_session)):
+    """Categorías distintas disponibles para el filtro del historial."""
+    return await object_repository.list_categories(db)
 
 @router.get("/stats", response_model=ObjectStatsResponse)
 async def get_object_stats(db: AsyncSession = Depends(get_db_session)):

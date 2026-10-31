@@ -1,6 +1,7 @@
 from typing import Optional, List
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, distinct
+from sqlalchemy import select, func, case, distinct, or_
 from sqlalchemy.orm import selectinload
 from app.infrastructure.database.models import DetectedObjectORM, EnergyDataORM
 from app.infrastructure.repositories.base_repository import BaseRepository
@@ -21,20 +22,64 @@ class ObjectRepository(BaseRepository[DetectedObjectORM, DetectedObjectCreate, D
         result = await db.execute(select(self.model).filter(self.model.image_hash == image_hash))
         return result.scalars().first()
 
-    async def list_paginated(self, db: AsyncSession, page: int = 1, page_size: int = 20, **filters) -> tuple[int, List[DetectedObjectORM]]:
-        """Devuelve listado de objetos con limit e información total para UX Paginator."""
+    async def list_paginated(
+        self,
+        db: AsyncSession,
+        page: int = 1,
+        page_size: int = 20,
+        category: Optional[str] = None,
+        provider: Optional[str] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+        search: Optional[str] = None,
+        **filters,
+    ) -> tuple[int, List[DetectedObjectORM]]:
+        """Devuelve listado paginado con filtros de categoría, proveedor, fechas y búsqueda."""
         skip = (page - 1) * page_size
-        total = await self.count(db, **filters)
-        
-        stmt = select(self.model).options(selectinload(self.model.energy_data))
+
+        conditions = []
+        if category:
+            conditions.append(self.model.object_category == category)
+        if provider:
+            conditions.append(self.model.ai_provider == provider)
+        if from_date:
+            conditions.append(self.model.created_at >= from_date)
+        if to_date:
+            conditions.append(self.model.created_at <= to_date)
+        if search:
+            pattern = f"%{search.strip()}%"
+            conditions.append(
+                or_(
+                    self.model.object_name.ilike(pattern),
+                    self.model.object_material.ilike(pattern),
+                )
+            )
         for key, value in filters.items():
             if value is not None:
-                stmt = stmt.filter(getattr(self.model, key) == value)
-                
+                conditions.append(getattr(self.model, key) == value)
+
+        count_stmt = select(func.count()).select_from(self.model)
+        if conditions:
+            count_stmt = count_stmt.where(*conditions)
+        total = (await db.execute(count_stmt)).scalar() or 0
+
+        stmt = select(self.model).options(selectinload(self.model.energy_data))
+        if conditions:
+            stmt = stmt.where(*conditions)
         stmt = stmt.order_by(self.model.created_at.desc()).offset(skip).limit(page_size)
         result = await db.execute(stmt)
         data = result.scalars().all()
         return total, list(data)
+
+    async def list_categories(self, db: AsyncSession) -> List[str]:
+        """Categorías distintas presentes en el historial, ordenadas alfabéticamente."""
+        result = await db.execute(
+            select(self.model.object_category)
+            .where(self.model.object_category.isnot(None))
+            .distinct()
+            .order_by(self.model.object_category)
+        )
+        return [row[0] for row in result.all()]
 
     async def get_stats(self, db: AsyncSession) -> dict:
         """Agregados para el panel resumen del scanner: totales, promedios y últimos escaneos."""

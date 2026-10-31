@@ -1,9 +1,15 @@
 """
 Excepciones de dominio personalizadas para EnergyVision AI.
 
-Estas excepciones son lanzadas por la capa de dominio/aplicación y luego
+Estas excepciones son lanzadas por la capa de dominio/aplicación y luego son
 mapeadas a respuestas HTTP por el handler global en app/main.py.
 """
+
+# Prefijo interno usado en los errores del pipeline para señalar que no se pudo
+# identificar un residuo (imagen negra, sin detalle o no reconocida por la IA).
+# scan.py lo traduce a un 422 con un mensaje accionable para el frontend.
+UNRECOGNIZED_ERROR_PREFIX = "NO_RECONOCIDO"
+
 
 
 class EnergyVisionBaseError(Exception):

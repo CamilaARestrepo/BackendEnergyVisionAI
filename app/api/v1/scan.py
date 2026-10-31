@@ -20,7 +20,7 @@ from app.domain.schemas.object_schema import DetectedObjectSchema, EnergyDataSch
 from app.agents.graph import run_vision_pipeline
 from app.config import settings
 from app.utils.logger import logger
-from app.utils.exceptions import ImageTooLargeError
+from app.utils.exceptions import ImageTooLargeError, UNRECOGNIZED_ERROR_PREFIX
 
 from pydantic import BaseModel
 from typing import Optional
@@ -88,8 +88,28 @@ async def scan_object(
     final_state = await run_vision_pipeline(b64_img, image.content_type or "image/jpeg", force=force)
 
     if final_state.get("errors"):
-        errors_str = " | ".join(final_state["errors"])
+        errors = final_state["errors"]
+        errors_str = " | ".join(errors)
         logger.warning(f"Pipeline falló: {errors_str}")
+
+        # Residuo no identificable o imagen inutilizable → mensaje accionable.
+        if any(str(err).startswith(UNRECOGNIZED_ERROR_PREFIX) for err in errors):
+            reason = next(
+                (
+                    str(err).split(":", 1)[1].strip()
+                    for err in errors
+                    if str(err).startswith(UNRECOGNIZED_ERROR_PREFIX)
+                ),
+                "no se pudo identificar el residuo en la imagen.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"No se reconoció el residuo: {reason} "
+                    "Toma o carga una nueva foto con mejor iluminación y el objeto centrado."
+                ),
+            )
+
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Error en inferencia IA: {errors_str}",

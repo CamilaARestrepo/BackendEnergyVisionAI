@@ -12,7 +12,7 @@ import hashlib
 from io import BytesIO
 from typing import Tuple
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from app.utils.exceptions import ImageValidationError
 from app.utils.logger import logger
@@ -44,6 +44,12 @@ ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 # Tamaño máximo de salida para el modelo de IA (en píxeles, lado mayor)
 AI_MAX_IMAGE_DIMENSION = 1024
+
+# Umbrales para descartar imágenes sin contenido visible antes de llamar a la IA.
+# stddev mide el contraste/detalle: una imagen negra, blanca o uniforme tiene ~0.
+MIN_IMAGE_STDDEV = 6.0
+DARK_IMAGE_MEAN = 60.0
+BRIGHT_IMAGE_MEAN = 200.0
 
 
 def _detect_mime_from_bytes(data: bytes) -> str | None:
@@ -96,6 +102,46 @@ def validate_image_magic_bytes(data: bytes) -> str:
         )
 
     return detected_mime
+
+
+def check_image_has_content(data: bytes) -> Tuple[bool, str | None]:
+    """
+    Detecta imágenes negras, blancas o sin detalle suficiente para analizar.
+
+    No sustituye a la IA: solo descarta casos evidentes (bajo contraste o
+    uniformidad) para evitar llamadas costosas sobre imágenes inutilizables.
+
+    Args:
+        data: Raw bytes de la imagen ya validada por magic bytes.
+
+    Returns:
+        (True, None) si la imagen parece utilizable.
+        (False, motivo) si es una imagen negra, blanca o sin contenido.
+
+    Raises:
+        ImageValidationError: Si Pillow no puede abrir/analizar la imagen.
+    """
+    try:
+        with Image.open(BytesIO(data)) as img:
+            gray = img.convert("L")
+            gray.thumbnail((128, 128))
+            stat = ImageStat.Stat(gray)
+            mean = float(stat.mean[0])
+            stddev = float(stat.stddev[0])
+    except Exception as e:
+        raise ImageValidationError(f"No se pudo analizar el contenido de la imagen: {e}") from e
+
+    if stddev < MIN_IMAGE_STDDEV:
+        if mean < DARK_IMAGE_MEAN:
+            return False, "La imagen está completamente negra o demasiado oscura."
+        if mean > BRIGHT_IMAGE_MEAN:
+            return False, "La imagen está completamente blanca o sobreexpuesta."
+        return False, "La imagen no tiene suficiente detalle para identificar un residuo."
+
+    logger.debug(
+        f"Contenido de imagen OK: brillo medio={mean:.1f}, contraste={stddev:.1f}"
+    )
+    return True, None
 
 
 def resize_image_for_ai(data: bytes, max_dimension: int = AI_MAX_IMAGE_DIMENSION) -> Tuple[bytes, str]:

@@ -14,11 +14,29 @@ no necesiten hacer ninguna consulta adicional a SQLite.
 from app.agents.state import AgentState
 from app.chains.detection_chain import detection_chain
 from app.providers.cache import provider_cache
-from app.utils.exceptions import ProviderNotConfiguredError, AIInferenceError
+from app.utils.exceptions import (
+    ProviderNotConfiguredError,
+    AIInferenceError,
+    UNRECOGNIZED_ERROR_PREFIX,
+)
 from app.utils.logger import logger
 
 # Umbral de confianza para reintento automático (definido en SRS §9.2)
 CONFIDENCE_RETRY_THRESHOLD = 0.4
+
+# Umbral por debajo del cual se considera que no hay un residuo identificable.
+UNRECOGNIZED_CONFIDENCE_THRESHOLD = 0.3
+
+# Marcadores de nombre que indican que el modelo no identificó un residuo real.
+UNRECOGNIZED_NAME_MARKERS = (
+    "no identificable",
+    "no identificado",
+    "no reconocido",
+    "no reconocible",
+    "desconocido",
+    "unknown",
+    "no visible",
+)
 
 # Prompt de reintento — más explícito para objetos con baja confianza
 RETRY_SYSTEM_ADDENDUM = (
@@ -83,7 +101,25 @@ async def detection_node(state: AgentState) -> dict:
             logger.warning(f"Reintento fallido (usando primer resultado): {retry_err}")
             # No propagamos el error del reintento — continuamos con el primer resultado
 
-    # ── 4. Construir payload del estado ───────────────────────────────────────
+    # ── 4. Cortar el pipeline si el residuo no se pudo identificar ───────────
+    name_lower = (result.name or "").strip().lower()
+    looks_unknown = any(
+        marker in name_lower for marker in UNRECOGNIZED_NAME_MARKERS
+    )
+    if looks_unknown or result.confidence_score < UNRECOGNIZED_CONFIDENCE_THRESHOLD:
+        logger.warning(
+            f"Residuo no reconocido: '{result.name}' "
+            f"(confidence={result.confidence_score:.2f}). Se cancela el pipeline "
+            "para pedir una nueva imagen."
+        )
+        return {
+            "errors": [
+                f"{UNRECOGNIZED_ERROR_PREFIX}: "
+                "no se pudo identificar el residuo en la imagen."
+            ]
+        }
+
+    # ── 5. Construir payload del estado ───────────────────────────────────────
     final_dict = result.model_dump()
     final_dict["ai_provider"] = ctx.provider_name
     final_dict["ai_model"] = ctx.model_name

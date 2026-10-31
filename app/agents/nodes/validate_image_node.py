@@ -11,8 +11,13 @@ Responsabilidades:
 import base64
 
 from app.agents.state import AgentState
-from app.utils.exceptions import ImageValidationError
-from app.utils.image_utils import validate_image_magic_bytes, resize_image_for_ai, compute_sha256
+from app.utils.exceptions import ImageValidationError, UNRECOGNIZED_ERROR_PREFIX
+from app.utils.image_utils import (
+    validate_image_magic_bytes,
+    check_image_has_content,
+    resize_image_for_ai,
+    compute_sha256,
+)
 from app.utils.logger import logger
 from app.config import settings
 
@@ -38,17 +43,28 @@ async def validate_image_node(state: AgentState) -> dict:
     except ImageValidationError as e:
         return {"errors": [str(e)]}
 
-    # 3. Redimensionar imagen para optimizar envío a IA (máx 1024x1024)
+    # 3. Descartar imágenes negras, blancas o sin detalle antes de llamar a la IA.
+    #    Evita que el modelo "alucine" un residuo sobre una imagen inutilizable.
+    try:
+        has_content, reason = check_image_has_content(raw_bytes)
+    except ImageValidationError as e:
+        return {"errors": [f"{UNRECOGNIZED_ERROR_PREFIX}: {e}"]}
+
+    if not has_content:
+        logger.warning(f"Imagen descartada por falta de contenido: {reason}")
+        return {"errors": [f"{UNRECOGNIZED_ERROR_PREFIX}: {reason}"]}
+
+    # 4. Redimensionar imagen para optimizar envío a IA (máx 1024x1024)
     try:
         processed_bytes, processed_mime = resize_image_for_ai(raw_bytes)
     except ImageValidationError as e:
         return {"errors": [str(e)]}
 
-    # 4. Recalcular base64 y hash con la imagen ya procesada
+    # 5. Recalcular base64 y hash con la imagen ya procesada
     processed_b64 = base64.b64encode(processed_bytes).decode("utf-8")
     image_hash = compute_sha256(processed_bytes)
 
-    # 5. Caché RAG: si la imagen ya fue analizada (mismo hash) y no se fuerza
+    # 6. Caché RAG: si la imagen ya fue analizada (mismo hash) y no se fuerza
     #    re-análisis, se corta el pipeline y se responde desde la BD ahorrando
     #    las 4 llamadas LLM (detection, waste, energy, enrichment).
     if settings.ENABLE_IMAGE_CACHE and not state.get("force"):
